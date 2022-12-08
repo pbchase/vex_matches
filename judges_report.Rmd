@@ -1,0 +1,255 @@
+---
+title: "Judges Report"
+author: "Philip Chase"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(httr)
+library(kableExtra)
+```
+
+```{r event_facts}
+matches <- tribble(
+  ~event_code, ~date, ~name, ~divisions, ~notebook_file, ~interview_file,
+  "RE-VIQC-22-8238", "10-Dec-2022", "WWR December Blended (MS/ES) VEX IQ Tournament", 2,
+  "/Users/pbchase/Downloads/P & C Robotic Notebooks for 10-22-2022.xlsx", "",
+  "RE-VIQC-21-4702", "6-Nov-2021", "WWR November Pitching In Tournament", 2, "", ""
+) %>%
+  mutate(notebook_file = if_else(
+    !is.na(notebook_file) & notebook_file != "",
+    notebook_file,
+    here::here("output", paste(event_code, "notebooks.csv", sep = "_"))
+  )) %>%
+  mutate(interview_file = if_else(
+    !is.na(interview_file) & interview_file != "",
+    interview_file,
+    here::here("output", paste(event_code, "interviews.csv", sep = "_"))
+  )) %>%
+  mutate(event_number_for_url = paste0("4", str_remove(event_code, ".*-"))) %>%
+  mutate(team_list_url = paste("https://www.robotevents.com/eventEntities",
+    event_number_for_url,
+    "teamsReport",
+    sep = "/"
+  )) %>%
+  mutate(skills_url = paste("https://www.robotevents.com/eventEntities",
+    event_number_for_url,
+    "skillsReport",
+    sep = "/"
+  )) %>%
+  mutate(results_url = paste("https://www.robotevents.com/eventEntities",
+    event_number_for_url,
+    "resultsReport/",
+    sep = "/"
+  ))
+
+match <- matches %>%
+  filter(event_code == "RE-VIQC-22-8238")
+
+match <- matches %>%
+  filter(event_code == "RE-VIQC-21-4702")
+
+get_xls_from_url <- function(my_url) {
+  tmp_file <- tempfile(fileext = ".xls")
+  httr::GET(url = my_url, write_disk(tmp_file))
+  df <- readxl::read_xls(tmp_file) %>%
+    janitor::clean_names()
+  fs::file_delete(tmp_file)
+  return(df)
+}
+
+teams <- get_xls_from_url(match$team_list_url)
+```
+
+```{r arrival_data}
+# Get the list of scratches from the Event Partner
+scratches <- c(
+)
+
+checked_in_teams <- teams %>%
+  filter(! team %in% scratches)
+
+registered_team_count = nrow(teams)
+scratched_team_count = length(scratches)
+checked_in_team_count = nrow(checked_in_teams)
+
+```
+
+## Counts
+
+- Registered team count: `r registered_team_count`
+- Scratched team count: `r scratched_team_count`
+
+## List of scratched teams
+`r scratches`
+
+```{r make_empty_files}
+if (!fs::dir_exists("output")) {
+  fs::dir_create("output")
+}
+
+# Write out an empty Interviews file if it is does not exist
+if (!fs::file_exists(match$interview_file)) {
+  checked_in_teams %>%
+  select(team) %>%
+  mutate(interview_score = NA) %>%
+    write_csv(match$interview_file, na = "")
+}
+
+# Write out an empty notebooks file if it is does not exist
+if (!fs::file_exists(match$notebook_file)) {
+  checked_in_teams %>%
+  select(team) %>%
+  mutate(notebook_score = NA) %>%
+  write_csv(match$notebook_file, na = "")
+}
+```
+
+```{r judging_data, warning=FALSE, echo=FALSE, include=FALSE}
+notebooks <- read_csv(match$notebook_file) %>%
+  janitor::clean_names() %>%
+  mutate(team = toupper(team)) %>%
+  arrange(desc(notebook_score)) %>%
+  mutate(notebook_rank = if_else(is.na(notebook_score), NA_integer_, row_number()))
+
+# Judged teams not in registrants
+notebook_data_not_in_registrants <- notebooks %>%
+  anti_join(checked_in_teams, by="team") %>%
+  select(team)
+
+# registrants not in judged teams
+registrants_not_in_notebook_data <- checked_in_teams %>%
+  anti_join(notebooks, by="team")
+
+interviews <- read_csv(match$interview_file) %>%
+  arrange(desc(interview_score)) %>%
+  mutate(interview_rank = if_else(is.na(interview_score), NA_integer_, row_number()))
+
+interviews_completed <- interviews %>%
+  filter(!is.na(interview_score)) %>%
+  nrow()
+
+interviews_remaining <- nrow(checked_in_teams) - interviews_completed
+
+teams_to_interview <- interviews %>%
+  filter(is.na(interview_score)) %>%
+  select(team)
+
+judging <- checked_in_teams %>%
+  select(team) %>%
+  left_join(notebooks, by = "team") %>%
+  left_join(interviews, by = "team") %>%
+  mutate(judged_score = notebook_score + interview_score) %>%
+  arrange(desc(judged_score)) %>%
+  mutate(judged_rank = if_else(is.na(judged_score), NA_integer_, row_number()))
+```
+
+## Notebook data not in registrants
+
+`r kbl(notebook_data_not_in_registrants) %>%
+  kable_styling()`
+
+## Registrants not in notebook data
+
+`r kbl(registrants_not_in_notebook_data) %>%
+  kable_styling()`
+
+## Interviews
+
+- Interviewed team count: `r interviews_completed`
+- Interviews remaining: `r interviews_remaining`
+
+These teams still need to be recorded in the interview file:
+
+`r kbl(teams_to_interview) %>%
+  kable_styling()`
+
+```{r skills, warning=FALSE, include = FALSE, message = FALSE}
+# get results of skills competition
+skills_results <- get_xls_from_url(match$skills_url)
+skills_data <- skills_results %>%
+  janitor::clean_names() %>%
+  pivot_wider(
+    id_cols = c("rank", "team"),
+    names_from = c("type"),
+    values_from = c("highscore", "attempts")
+  ) %>%
+  mutate(highscore_combined = highscore_driver + highscore_programming) %>%
+  select(rank, team, highscore_combined, everything()) %>%
+  rename(skills_rank = rank)
+```
+
+```{r qualifier_function}
+get_qualifier_results_for_division <- function(base_results_url, division) {
+  results_url <- paste0(base_results_url, division)
+  tmp_file <- tempfile()
+  httr::GET(url = results_url, write_disk(tmp_file))
+  results <- readxl::read_xls(tmp_file)
+  data <-
+    results %>%
+    janitor::clean_names() %>%
+    rename_with(., ~ gsub("_[0-9]+", "", .x), contains("_team_")) %>%
+    pivot_longer(
+      cols = c(red_team, blue_team),
+      names_to = c("team_color"),
+      values_to = c("team_number")
+    ) %>%
+    pivot_longer(
+      cols = c(red_score, blue_score),
+      values_to = c("team_score")
+    ) %>%
+    mutate(team_color = gsub("_team", "", team_color)) %>%
+    mutate(name = gsub("_score", "", name)) %>%
+    filter(team_color == name) %>%
+    mutate(division = division) %>%
+    select(division, match, team_color, team_number, team_score)
+
+  return(data)
+}
+```
+
+```{r qualifiers}
+qualifier_results <- tribble(
+  ~division, ~match, ~team_color, ~team_number, ~team_score,
+  1, "a", "b", "c", 99
+) %>% filter(F)
+
+for (division in seq.int(1, match$divisions)) {
+  qualifier_results <- bind_rows(qualifier_results, get_qualifier_results_for_division(match$results_url, division = division))
+  }
+
+ranked_qualifer_results <- qualifier_results %>%
+  rename(team = team_number) %>%
+  group_by(team) %>%
+  summarize(average_score = mean(team_score)) %>%
+  arrange(desc(average_score)) %>%
+  mutate(qualifier_rank = row_number())
+```
+
+```{r combined_results}
+combined_scores <-
+  judging %>%
+  left_join(skills_data, by = "team") %>%
+  left_join(ranked_qualifer_results, by = "team") %>%
+  rowwise() %>%
+  mutate(combined_rank = if_else(
+    is.na(coalesce(skills_rank, qualifier_rank, judged_rank)),
+    NA_real_,
+    sum(skills_rank, qualifier_rank, judged_rank, na.rm = T)
+  )) %>%
+  select(team, combined_rank, contains("rank"), everything()) %>%
+  arrange(combined_rank)
+```
+
+## Combined ranking
+
+The combined ranking for Judging, Skills and Qualifiers is
+
+`r kbl(combined_scores) %>%
+  kable_styling()`

@@ -3,3 +3,8 @@
 *.csv
 *.xlsx
 *.pdf
+
+*.html
+*.log
+*.tex
+*.xlsx
