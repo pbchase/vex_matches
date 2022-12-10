@@ -8,3 +8,6 @@
 *.log
 *.tex
 *.xlsx
+
+# ignore the download cache
+cache/*

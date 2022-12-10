@@ -19,7 +19,7 @@ library(kableExtra)
 matches <- tribble(
   ~event_code, ~date, ~name, ~divisions, ~notebook_file, ~interview_file,
   "RE-VIQC-22-8238", "10-Dec-2022", "WWR December Blended (MS/ES) VEX IQ Tournament", 2,
-  "/Users/pbchase/Downloads/P & C Robotic Notebooks for 10-22-2022.xlsx", "",
+  "/Users/pbchase/git/vex_matches/output/P & C Robotic Notebooks for 12-10-2022.csv", "",
   "RE-VIQC-21-4702", "6-Nov-2021", "WWR November Pitching In Tournament", 2, "", ""
 ) %>%
   mutate(notebook_file = if_else(
@@ -52,15 +52,22 @@ matches <- tribble(
 match <- matches %>%
   filter(event_code == "RE-VIQC-22-8238")
 
-match <- matches %>%
-  filter(event_code == "RE-VIQC-21-4702")
+# match <- matches %>%
+#   filter(event_code == "RE-VIQC-21-4702")
 
-get_xls_from_url <- function(my_url) {
-  tmp_file <- tempfile(fileext = ".xls")
-  httr::GET(url = my_url, write_disk(tmp_file))
-  df <- readxl::read_xls(tmp_file) %>%
+get_xls_from_url <- function(my_url, use_cached_data = TRUE) {
+  if (!fs::dir_exists("cache")) {
+    fs::dir_create("cache")
+  }
+  cached_file_name <- here::here("cache", paste0(fs::path_sanitize(my_url), ".xls"))
+  if (!fs::file_exists(cached_file_name) | !use_cached_data) {
+    message("Fetching data from ", my_url)
+    httr::GET(url = my_url, write_disk(cached_file_name, overwrite = T))  
+  } else {
+    message("Using cached data for ", my_url)
+  }
+  df <- readxl::read_xls(cached_file_name) %>%
     janitor::clean_names()
-  fs::file_delete(tmp_file)
   return(df)
 }
 
@@ -170,27 +177,32 @@ These teams still need to be recorded in the interview file:
 `r kbl(teams_to_interview) %>%
   kable_styling()`
 
-```{r skills, warning=FALSE, include = FALSE, message = FALSE}
+```{r skills, warning=FALSE, include = FALSE, message = TRUE}
 # get results of skills competition
 skills_results <- get_xls_from_url(match$skills_url)
-skills_data <- skills_results %>%
-  janitor::clean_names() %>%
-  pivot_wider(
-    id_cols = c("rank", "team"),
-    names_from = c("type"),
-    values_from = c("highscore", "attempts")
-  ) %>%
-  mutate(highscore_combined = highscore_driver + highscore_programming) %>%
-  select(rank, team, highscore_combined, everything()) %>%
-  rename(skills_rank = rank)
+if (nrow(skills_results) > 0) {
+  skills_data <- skills_results %>%
+    janitor::clean_names() %>%
+    pivot_wider(
+      id_cols = c("rank", "team"),
+      names_from = c("type"),
+      values_from = c("highscore", "attempts")
+    ) %>%
+    mutate(highscore_combined = highscore_driver + highscore_programming) %>%
+    select(rank, team, highscore_combined, everything()) %>%
+    rename(skills_rank = rank)
+} else {
+  skills_data <- tribble(
+    ~skills_rank, ~team, ~highscore_combined, ~highscore_driver, ~highscore_programming,
+    1, "asdf", 1, 1, 1
+  ) %>% filter(F)
+}
 ```
 
 ```{r qualifier_function}
 get_qualifier_results_for_division <- function(base_results_url, division) {
   results_url <- paste0(base_results_url, division)
-  tmp_file <- tempfile()
-  httr::GET(url = results_url, write_disk(tmp_file))
-  results <- readxl::read_xls(tmp_file)
+  results <- get_xls_from_url(results_url)
   data <-
     results %>%
     janitor::clean_names() %>%
@@ -229,7 +241,10 @@ ranked_qualifer_results <- qualifier_results %>%
   group_by(team) %>%
   summarize(average_score = mean(team_score)) %>%
   arrange(desc(average_score)) %>%
-  mutate(qualifier_rank = row_number())
+  mutate(qualifier_rank = if_else(!is.na(average_score),
+    row_number(),
+    NA_integer_
+  ))
 ```
 
 ```{r combined_results}
@@ -243,8 +258,20 @@ combined_scores <-
     NA_real_,
     sum(skills_rank, qualifier_rank, judged_rank, na.rm = T)
   )) %>%
-  select(team, combined_rank, contains("rank"), everything()) %>%
-  arrange(combined_rank)
+  select(team,
+         combined_rank,
+         contains("rank"),
+         highscore_driver,
+         highscore_programming,
+         contains("score")) %>%
+  arrange(combined_rank,
+          judged_rank,
+          interview_rank,
+          notebook_rank,
+          skills_rank,
+          qualifier_rank,
+          highscore_driver,
+          highscore_programming)
 ```
 
 ## Combined ranking
