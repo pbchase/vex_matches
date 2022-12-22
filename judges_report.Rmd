@@ -137,7 +137,11 @@ notebooks <- read_csv(match$notebook_file) %>%
   janitor::clean_names() %>%
   mutate(team = toupper(team)) %>%
   arrange(desc(notebook_score)) %>%
-  mutate(notebook_rank = if_else(is.na(notebook_score), NA_integer_, row_number()))
+  mutate(notebook_rank = if_else(
+    is.na(notebook_score) | notebook_score == 0,
+    NA_integer_,
+    row_number()
+  ))
 
 # Judged teams not in registrants
 notebook_data_not_in_registrants <- notebooks %>%
@@ -150,7 +154,11 @@ registrants_not_in_notebook_data <- checked_in_teams %>%
 
 interviews <- read_csv(match$interview_file) %>%
   arrange(desc(interview_score)) %>%
-  mutate(interview_rank = if_else(is.na(interview_score), NA_integer_, row_number()))
+  mutate(interview_rank = if_else(
+    is.na(interview_score) | interview_score == 0,
+    NA_integer_,
+    row_number()
+  ))
 
 interviews_completed <- interviews %>%
   filter(!is.na(interview_score)) %>%
@@ -266,30 +274,36 @@ ranked_qualifer_results <- qualifier_results %>%
 ```{r excellence_scores}
 excellence_skills_count <- max(nrow(skills_data) * 0.2, 5)
 excellence_qualifiers_count <- max(nrow(ranked_qualifer_results) * 0.3, 10)
+excellence_criteria = c(
+  "has_a_notebook",
+  "has_an_interview",
+  "top_of_skills",
+  "top_of_qualifiers"
+)
 excellence_scores <-
-  # must have a notebook
   judging %>%
-  filter(!is.na(notebook_score)) %>%
-  filter(notebook_score != 0) %>%
+  # must have a notebook
+  mutate(has_a_notebook = !is.na(notebook_score) & notebook_score != 0) %>%
   # must have an interview
-  filter(!is.na(interview_score)) %>%
-  filter(interview_score != 0) %>%
+  mutate(has_an_interview = !is.na(interview_score) & interview_score != 0) %>%
   # must be in the top 5 or 20% of skills scores
-  inner_join(
+  left_join(
     skills_data %>%
       arrange(skills_rank) %>%
-      slice_head(n = excellence_skills_count),
+      mutate(top_of_skills = (row_number() <= excellence_skills_count)),
     by = "team"
   ) %>%
-  inner_join(
+  left_join(
     ranked_qualifer_results %>%
-      slice_head(n = excellence_qualifiers_count),
+      mutate(top_of_qualifiers = (row_number() <= excellence_qualifiers_count)),
     by = "team"
   ) %>%
   rowwise() %>%
-  # mutate(excellence_score = sum(skills_rank, qualifier_rank, judged_rank)) %>%
+  mutate(combined_rank = sum(judged_rank, skills_rank, qualifier_rank)) %>%
+  mutate(combined_excellence_criteria = sum(has_a_notebook, has_an_interview, top_of_skills, top_of_qualifiers)) %>%
   arrange(
-    # excellence_score,
+    desc(combined_excellence_criteria),
+    combined_rank,
     judged_rank,
     notebook_rank,
     interview_rank,
@@ -302,8 +316,9 @@ excellence_scores <-
   mutate(excellence_rank = row_number()) %>%
   select(
     team,
-    #   excellence_rank,
-    # excellence_score,
+    any_of(excellence_criteria),
+    combined_excellence_criteria,
+    combined_rank,
     judged_rank,
     notebook_rank,
     interview_rank,
@@ -312,11 +327,13 @@ excellence_scores <-
     highscore_combined,
     highscore_driver,
     highscore_programming
-  )
+  ) %>%
+  # Display to top of the rankings
+  filter(combined_excellence_criteria >= 3 | row_number() <= 10)
 ```
 ## Excellence ranking
 
-The Excellence ranking combining Judging, Skills and Qualifiers is
+The first four criteria are the Excellence award criteria that can be assessed directly from the data. `combined_excellence_criteria` is the sum of those four criteria. `combined_rank` is the sum of the judging rank, skills rank and qualifiers rank. 
 
 `r kbl(excellence_scores) %>%
   kable_styling()`
