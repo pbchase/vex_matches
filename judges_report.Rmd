@@ -32,6 +32,9 @@ matches <- tribble(
     interview_file,
     here::here("output", paste(event_code, "interviews.csv", sep = "_"))
   )) %>%
+  mutate(scratch_file = 
+    here::here("output", paste(event_code, "scratches.csv", sep = "_")
+  )) %>%
   mutate(event_number_for_url = paste0("4", str_remove(event_code, ".*-"))) %>%
   mutate(team_list_url = paste("https://www.robotevents.com/eventEntities",
     event_number_for_url,
@@ -74,28 +77,6 @@ get_xls_from_url <- function(my_url, use_cached_data = TRUE) {
 teams <- get_xls_from_url(match$team_list_url)
 ```
 
-```{r arrival_data}
-# Get the list of scratches from the Event Partner
-scratches <- c(
-)
-
-checked_in_teams <- teams %>%
-  filter(! team %in% scratches)
-
-registered_team_count = nrow(teams)
-scratched_team_count = length(scratches)
-checked_in_team_count = nrow(checked_in_teams)
-
-```
-
-## Counts
-
-- Registered team count: `r registered_team_count`
-- Scratched team count: `r scratched_team_count`
-
-## List of scratched teams
-`r scratches`
-
 ```{r make_empty_files}
 if (!fs::dir_exists("output")) {
   fs::dir_create("output")
@@ -116,7 +97,40 @@ if (!fs::file_exists(match$notebook_file)) {
   mutate(notebook_score = NA) %>%
   write_csv(match$notebook_file, na = "")
 }
+
+# Write out an scratch file if it is does not exist
+if (!fs::file_exists(match$scratch_file)) {
+  teams %>%
+  select(team) %>%
+  mutate(scratch = 0) %>%
+  write_csv(match$scratch_file, na = "")
+}
 ```
+
+```{r arrival_data}
+# read the list of scratches from the Event Partner
+scratches <- read_csv(match$scratch_file) %>%
+  janitor::clean_names() %>%
+  filter(scratch == 1) %>%
+  mutate(team = toupper(team)) %>%
+  pull(team)
+
+checked_in_teams <- teams %>%
+  filter(! team %in% scratches)
+
+registered_team_count = nrow(teams)
+scratched_team_count = length(scratches)
+checked_in_team_count = nrow(checked_in_teams)
+
+```
+
+## Counts
+
+- Registered team count: `r registered_team_count`
+- Scratched team count: `r scratched_team_count`
+
+## List of scratched teams
+`r scratches`
 
 ```{r judging_data, warning=FALSE, echo=FALSE, include=FALSE}
 notebooks <- read_csv(match$notebook_file) %>%
@@ -128,7 +142,7 @@ notebooks <- read_csv(match$notebook_file) %>%
 # Judged teams not in registrants
 notebook_data_not_in_registrants <- notebooks %>%
   anti_join(checked_in_teams, by="team") %>%
-  select(team)
+  select(team, notebook_score, notebook_rank)
 
 # registrants not in judged teams
 registrants_not_in_notebook_data <- checked_in_teams %>%
@@ -188,7 +202,9 @@ if (nrow(skills_results) > 0) {
       names_from = c("type"),
       values_from = c("highscore", "attempts")
     ) %>%
-    mutate(highscore_combined = highscore_driver + highscore_programming) %>%
+    rowwise() %>%
+    mutate(highscore_combined = sum(highscore_driver, highscore_programming, na.rm = TRUE)) %>%
+    ungroup() %>%
     select(rank, team, highscore_combined, everything()) %>%
     rename(skills_rank = rank)
 } else {
@@ -239,7 +255,7 @@ for (division in seq.int(1, match$divisions)) {
 ranked_qualifer_results <- qualifier_results %>%
   rename(team = team_number) %>%
   group_by(team) %>%
-  summarize(average_score = mean(team_score)) %>%
+  summarize(average_score = mean(team_score, na.rm = T)) %>%
   arrange(desc(average_score)) %>%
   mutate(qualifier_rank = if_else(!is.na(average_score),
     row_number(),
@@ -247,36 +263,60 @@ ranked_qualifer_results <- qualifier_results %>%
   ))
 ```
 
-```{r combined_results}
-combined_scores <-
+```{r excellence_scores}
+excellence_skills_count <- max(nrow(skills_data) * 0.2, 5)
+excellence_qualifiers_count <- max(nrow(ranked_qualifer_results) * 0.3, 10)
+excellence_scores <-
+  # must have a notebook
   judging %>%
-  left_join(skills_data, by = "team") %>%
-  left_join(ranked_qualifer_results, by = "team") %>%
+  filter(!is.na(notebook_score)) %>%
+  filter(notebook_score != 0) %>%
+  # must have an interview
+  filter(!is.na(interview_score)) %>%
+  filter(interview_score != 0) %>%
+  # must be in the top 5 or 20% of skills scores
+  inner_join(
+    skills_data %>%
+      arrange(skills_rank) %>%
+      slice_head(n = excellence_skills_count),
+    by = "team"
+  ) %>%
+  inner_join(
+    ranked_qualifer_results %>%
+      slice_head(n = excellence_qualifiers_count),
+    by = "team"
+  ) %>%
   rowwise() %>%
-  mutate(combined_rank = if_else(
-    is.na(coalesce(skills_rank, qualifier_rank, judged_rank)),
-    NA_real_,
-    sum(skills_rank, qualifier_rank, judged_rank, na.rm = T)
-  )) %>%
-  select(team,
-         combined_rank,
-         contains("rank"),
-         highscore_driver,
-         highscore_programming,
-         contains("score")) %>%
-  arrange(combined_rank,
-          judged_rank,
-          interview_rank,
-          notebook_rank,
-          skills_rank,
-          qualifier_rank,
-          highscore_driver,
-          highscore_programming)
+  # mutate(excellence_score = sum(skills_rank, qualifier_rank, judged_rank)) %>%
+  arrange(
+    # excellence_score,
+    judged_rank,
+    notebook_rank,
+    interview_rank,
+    skills_rank,
+    qualifier_rank,
+    highscore_driver,
+    highscore_programming
+  ) %>%
+  ungroup() %>%
+  mutate(excellence_rank = row_number()) %>%
+  select(
+    team,
+    #   excellence_rank,
+    # excellence_score,
+    judged_rank,
+    notebook_rank,
+    interview_rank,
+    skills_rank,
+    qualifier_rank,
+    highscore_combined,
+    highscore_driver,
+    highscore_programming
+  )
 ```
+## Excellence ranking
 
-## Combined ranking
+The Excellence ranking combining Judging, Skills and Qualifiers is
 
-The combined ranking for Judging, Skills and Qualifiers is
-
-`r kbl(combined_scores) %>%
+`r kbl(excellence_scores) %>%
   kable_styling()`
