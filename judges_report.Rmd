@@ -337,3 +337,41 @@ The first four criteria are the Excellence award criteria that can be assessed d
 
 `r kbl(excellence_scores) %>%
   kable_styling()`
+
+
+```{r design_scores}
+design_criteria = c(
+  "has_a_notebook",
+  "has_an_interview"
+)
+design_scores <-
+  judging %>%
+  # must have a notebook
+  mutate(has_a_notebook = !is.na(notebook_score) & notebook_score != 0) %>%
+  # must have an interview
+  mutate(has_an_interview = !is.na(interview_score) & interview_score != 0) %>%
+  rowwise() %>%
+  mutate(combined_design_criteria = sum(has_a_notebook, has_an_interview)) %>%
+  filter(combined_design_criteria == 2) %>%
+  arrange(
+    notebook_rank,
+    judged_rank,
+    interview_rank
+  ) %>%
+  ungroup() %>%
+  select(
+    team,
+    any_of(design_criteria),
+    notebook_rank,
+    judged_rank,
+    interview_rank
+  ) %>%
+  # Display to top of the rankings
+  filter(row_number() <= 10)
+```
+## Design ranking
+
+Only the top 10 teams that have both a notebook score and an interview score are shown.  The teams are sorted by Notebook rank and then total judged rank.
+
+`r kbl(design_scores) %>%
+  kable_styling()`
