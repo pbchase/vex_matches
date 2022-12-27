@@ -375,3 +375,38 @@ Only the top 10 teams that have both a notebook score and an interview score are
 
 `r kbl(design_scores) %>%
   kable_styling()`
+
+
+```{r judges_scores}
+judges_criteria = c(
+  "has_an_interview"
+)
+judges_scores <-
+  judging %>%
+  # must have an interview
+  mutate(has_an_interview = !is.na(interview_score) & interview_score != 0) %>%
+  rowwise() %>%
+  mutate(combined_judges_criteria = sum(has_an_interview)) %>%
+  filter(combined_judges_criteria == 1) %>%
+  arrange(
+    interview_rank,
+    judged_rank,
+    notebook_rank
+  ) %>%
+  ungroup() %>%
+  select(
+    team,
+    any_of(judges_criteria),
+    interview_rank,
+    judged_rank,
+    notebook_rank
+  ) %>%
+  # Display to top of the rankings
+  filter(row_number() <= 20)
+```
+## Judges award ranking
+
+Only the top 20 teams that have an interview score are shown. The teams are sorted by interview rank and then total judged rank.
+
+`r kbl(judges_scores) %>%
+  kable_styling()`
