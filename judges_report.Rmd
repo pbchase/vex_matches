@@ -365,15 +365,13 @@ design_scores <-
     notebook_rank,
     judged_rank,
     interview_rank
-  ) %>%
-  # Display to top of the rankings
-  filter(row_number() <= 10)
+  )
 ```
 ## Design ranking
 
 Only the top 10 teams that have both a notebook score and an interview score are shown.  The teams are sorted by Notebook rank and then total judged rank.
 
-`r kbl(design_scores) %>%
+`r kbl(design_scores %>% filter(row_number() <= 10)) %>%
   kable_styling()`
 
 
@@ -409,4 +407,11 @@ judges_scores <-
 Only the top 20 teams that have an interview score are shown. The teams are sorted by interview rank and then total judged rank.
 
 `r kbl(judges_scores) %>%
+  kable_styling()`
+
+## Innovate award ranking
+
+The Innovate Award uses the same hard criteria as the Design Award. The top 10 teams that meet those hard criteria are again shown here.
+
+`r kbl(design_scores %>% filter(row_number() <= 10)) %>%
   kable_styling()`
