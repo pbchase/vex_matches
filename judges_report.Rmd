@@ -421,3 +421,60 @@ The Innovate Award uses the same hard criteria as the Design Award. The top 10 t
 
 `r kbl(design_scores %>% filter(row_number() <= 10)) %>%
   kable_styling()`
+
+
+```{r think_scores}
+think_skills_count <- max(nrow(skills_data) * 0.2, 5)
+think_criteria = c(
+  "has_an_interview",
+  "has_a_notebook",
+  "has_a_skills_score",
+  "has_a_programming_skills_score"
+)
+think_scores <-
+  judging %>%
+  # must have a notebook
+  mutate(has_a_notebook = !is.na(notebook_score) & notebook_score != 0) %>%
+  # must have an interview
+  mutate(has_an_interview = !is.na(interview_score) & interview_score != 0) %>%
+  # must have a programming score
+  left_join(
+    skills_data %>%
+      # must have a skills score
+      mutate(has_a_skills_score = !is.na(skills_rank)) %>%
+      # must have a programming score
+      arrange(desc(highscore_programming)) %>%
+      mutate(programming_skills_rank = if_else(is.na(highscore_programming), as.integer(NA) , row_number())) %>%
+      mutate(has_a_programming_skills_score = !is.na(programming_skills_rank)),
+    by = "team"
+  ) %>%
+  rowwise() %>%
+  mutate(combined_rank = sum(interview_rank, programming_skills_rank)) %>%
+  mutate(combined_think_criteria = sum(has_a_notebook, has_an_interview, has_a_skills_score, has_a_programming_skills_score)) %>%
+  arrange(
+    desc(combined_think_criteria),
+    combined_rank,
+    interview_rank,
+    programming_skills_rank,
+    notebook_rank
+  ) %>%
+  ungroup() %>%
+  mutate(think_rank = row_number()) %>%
+  select(
+    team,
+    any_of(think_criteria),
+    combined_think_criteria,
+    combined_rank,
+    interview_rank,
+    programming_skills_rank,
+    notebook_rank
+  ) %>%
+  # Display to top of the rankings
+  filter(combined_think_criteria >= 3 & row_number() <= 15)
+```
+## Think ranking
+
+The first four criteria are the Think award criteria that can be assessed directly from the data. The notebook requirement is not a clearly stated criteria, but given the number of judged criteria relating to programming it could be hard to assess those criteria without a notebook so it is included. `combined_think_criteria` is the sum of those four criteria. `combined_rank` is the sum of the interview rank and skills programming rank. 
+
+`r kbl(think_scores) %>%
+  kable_styling()`
