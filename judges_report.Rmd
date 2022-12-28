@@ -107,7 +107,7 @@ if (!fs::file_exists(match$scratch_file)) {
 }
 ```
 
-```{r arrival_data}
+```{r arrival_data, echo=FALSE, include=FALSE}
 # read the list of scratches from the Event Partner
 scratches <- read_csv(match$scratch_file) %>%
   janitor::clean_names() %>%
@@ -136,6 +136,7 @@ checked_in_team_count = nrow(checked_in_teams)
 notebooks <- read_csv(match$notebook_file) %>%
   janitor::clean_names() %>%
   mutate(team = toupper(team)) %>%
+  filter(!is.na(team)) %>%
   arrange(desc(notebook_score)) %>%
   mutate(notebook_rank = if_else(
     is.na(notebook_score) | notebook_score == 0,
@@ -166,9 +167,12 @@ interviews_completed <- interviews %>%
 
 interviews_remaining <- nrow(checked_in_teams) - interviews_completed
 
-teams_to_interview <- interviews %>%
+teams_without_an_interview_score <- interviews %>%
+  filter(!team %in% scratches) %>%
   filter(is.na(interview_score)) %>%
   select(team)
+
+some_interviews_remain = interviews_remaining > 0
 
 judging <- checked_in_teams %>%
   select(team) %>%
@@ -194,10 +198,12 @@ judging <- checked_in_teams %>%
 - Interviewed team count: `r interviews_completed`
 - Interviews remaining: `r interviews_remaining`
 
-These teams still need to be recorded in the interview file:
+```{r interviews_remaining, eval=some_interviews_remain}
+print("These teams still need to be recorded in the interview file:")
 
-`r kbl(teams_to_interview) %>%
-  kable_styling()`
+kbl(teams_without_an_interview_score) %>%
+  kable_styling()
+```
 
 ```{r skills, warning=FALSE, include = FALSE, message = TRUE}
 # get results of skills competition
