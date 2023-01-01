@@ -478,3 +478,78 @@ The first four criteria are the Think award criteria that can be assessed direct
 
 `r kbl(think_scores) %>%
   kable_styling()`
+
+
+
+```{r amaze_scores}
+amaze_skills_count <- max(nrow(skills_data) * 0.2, 5)
+amaze_criteria = c(
+  "has_an_interview",
+  "has_a_programming_skills_score",
+  "has_a_driver_skills_score",
+  "has_a_qualifier_rank"
+)
+amaze_scores <-
+  judging %>%
+  # must have an interview
+  mutate(has_an_interview = !is.na(interview_score) & interview_score != 0) %>%
+  # must have a programming score
+  left_join(
+    skills_data %>%
+      # must have a programming score
+      arrange(desc(highscore_programming)) %>%
+      mutate(programming_skills_rank = if_else(is.na(highscore_programming), as.integer(NA), row_number())) %>%
+      mutate(has_a_programming_skills_score = !is.na(programming_skills_rank)),
+    by = "team"
+  ) %>%
+  # Add driver skills rank
+  left_join(
+    skills_data %>%
+      arrange(desc(highscore_driver)) %>%
+      mutate(driver_skills_rank = if_else(is.na(highscore_driver), as.integer(NA), row_number())) %>%
+      mutate(has_a_driver_skills_score = !is.na(driver_skills_rank)) %>%
+      select(team, has_a_driver_skills_score, driver_skills_rank),
+    by = "team"
+  ) %>%
+  left_join(
+    ranked_qualifer_results %>%
+      mutate(has_a_qualifier_rank = is.na(qualifier_rank)),
+    by = "team"
+  ) %>%
+  rowwise() %>%
+  mutate(combined_rank = sum(interview_rank, programming_skills_rank, driver_skills_rank, qualifier_rank)) %>%
+  mutate(combined_amaze_criteria = sum(
+    has_an_interview,
+    has_a_programming_skills_score,
+    has_a_driver_skills_score,
+    has_a_qualifier_rank
+    )) %>%
+  arrange(
+    desc(combined_amaze_criteria),
+    combined_rank,
+    interview_rank,
+    programming_skills_rank,
+    driver_skills_rank,
+    qualifier_rank
+  ) %>%
+  ungroup() %>%
+  mutate(amaze_rank = row_number()) %>%
+  select(
+    team,
+    any_of(amaze_criteria),
+    combined_amaze_criteria,
+    combined_rank,
+    interview_rank,
+    programming_skills_rank,
+    driver_skills_rank,
+    qualifier_rank
+  ) %>%
+  # Display to top of the rankings
+  filter(combined_amaze_criteria >= 3 & row_number() <= 15)
+```
+## Amaze ranking
+
+The first five criteria are the Amaze award criteria that can be assessed directly from the data.  `combined_amaze_criteria` is the sum of those five criteria. `combined_rank` is the sum of the interview rank, programming skills rank, driver skills rank, and qualifier rank. 
+
+`r kbl(amaze_scores) %>%
+  kable_styling()`
