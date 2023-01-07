@@ -553,3 +553,42 @@ The first five criteria are the Amaze award criteria that can be assessed direct
 
 `r kbl(amaze_scores) %>%
   kable_styling()`
+
+
+```{r build_scores}
+build_criteria = c(
+  "has_an_interview"
+)
+build_scores <- judging %>%
+  # must have an interview
+  mutate(has_an_interview = !is.na(interview_score) & interview_score != 0) %>%
+  rowwise() %>%
+  mutate(combined_build_criteria = sum(
+    has_an_interview
+    )) %>%
+  arrange(
+    desc(combined_build_criteria),
+    interview_rank
+  ) %>%
+  ungroup() %>%
+  mutate(interview_rank = row_number()) %>%
+  # correct rank when scores are equal
+  group_by(interview_score) %>%
+  mutate(interview_rank = min(interview_rank)) %>%
+  ungroup() %>%
+  select(
+    team,
+    any_of(build_criteria),
+    combined_build_criteria,
+    interview_rank,
+    interview_score
+  ) %>%
+  # Display to top of the rankings
+  filter(combined_build_criteria >= 1 & row_number() <= 15)
+```
+## Build Award candidates ranking
+
+The first criteria is the one well-described Build Award criterium that can be assessed directly from the data. This report shows the top 15 teams in that criterium. These teams would make good candidates for this award.
+
+`r kbl(build_scores) %>%
+  kable_styling()`
